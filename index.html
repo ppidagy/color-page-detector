@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>컬러 페이지 색출기</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #181b24;
+    --border: #2a2e3a;
+    --text: #e6e8ee;
+    --muted: #9aa0ad;
+    --accent: #5b8cff;
+    --color-bad: #ff6b6b;
+    --color-good: #51cf66;
+    --warn-bg: #2b2410;
+    --warn-border: #6b5a1f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .notice {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #e8dca0;
+  }
+  .notice ul { margin: 6px 0 0 18px; padding: 0; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  label { font-size: 13px; color: var(--muted); }
+  input[type=number] {
+    width: 70px; background: #11131a; border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 4px 8px;
+  }
+  input[type=file] { color: var(--text); }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 18px; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary { background: #2a2e3a; }
+  #fileList { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .file-result {
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; background: var(--panel);
+  }
+  .file-result h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600;
+  }
+  .badge.pdf { background: #2d3a55; color: #8fb4ff; }
+  .badge.hwpx { background: #2d4a3a; color: #7fe0a8; }
+  .badge.hwp { background: #4a2d2d; color: #ff9b9b; }
+  .badge.unsupported { background: #4a2d2d; color: #ff9b9b; }
+  .page-grid {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+  }
+  .page-chip {
+    font-size: 12px; padding: 5px 9px; border-radius: 6px; min-width: 30px; text-align: center;
+    border: 1px solid var(--border);
+  }
+  .page-chip.color { background: rgba(255,107,107,0.18); border-color: var(--color-bad); color: #ffb3b3; }
+  .page-chip.bw { background: rgba(81,207,102,0.10); border-color: var(--color-good); color: #b6f0bf; }
+  .summary-line { font-size: 13px; color: var(--muted); margin: 6px 0; }
+  .summary-line b { color: var(--text); }
+  .progress-bar {
+    height: 6px; background: #2a2e3a; border-radius: 4px; overflow: hidden; margin-top: 8px;
+  }
+  .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width .2s; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 6px; border: 1px solid #444; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; margin-top: 6px; }
+  code { background: #11131a; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+  <h1>컬러 페이지 색출기</h1>
+  <div class="subtitle">PDF / HWPX / HWP 보고서 파일에서 컬러 페이지를 찾아냅니다. (브라우저에서만 동작, 서버 전송 없음)</div>
+
+  <div class="notice" style="border-color:#8a6d1f;background:#332a10;">
+    <b style="font-size:14px;">⚠ 정확한 페이지별 결과가 필요하면 → 한글에서 PDF로 저장한 뒤 업로드하세요</b>
+    <ul>
+      <li><b>PDF</b>: 각 페이지를 실제 이미지처럼 렌더링한 뒤 픽셀 색상을 분석합니다 → <b style="color:#b6f0bf">페이지/쪽번호별 정확한 판정 가능</b>.</li>
+      <li><b>HWPX(한글 신형식)</b>: 워드 문서처럼 글이 흐르는 구조라 XML만으로는 "몇 페이지째"인지 알 수 없습니다. 포함된 이미지·색상 정보는 보여주지만 <b style="color:#ffb3b3">페이지 단위 결과가 아닌 문서 전체 참고용</b>입니다. → 정확한 페이지가 필요하면 한글에서 <b>[파일 → 다른 이름으로 저장 → 파일 형식: PDF]</b>로 저장한 뒤 그 PDF를 업로드해 주세요.</li>
+      <li><b>HWP(구버전 바이너리)</b>: 브라우저에서 안전하게 시각적으로 분석할 방법이 없어 <b>미지원</b>입니다. 위와 동일하게 PDF로 변환 후 업로드해 주세요.</li>
+    </ul>
+    <div style="margin-top:8px; font-size:12px; color:#cbb86a;">※ 이 변환은 한글 프로그램에서 직접 한 번만 눌러주시면 되고, 자동화는 지원하지 않습니다 (브라우저 보안 정책상 불가능).</div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <input type="file" id="fileInput" multiple accept=".pdf,.hwpx,.hwp">
+    </div>
+    <div class="row">
+      <label>색 판정 채도 기준 (0~255, 클수록 둔감)
+        <input type="number" id="satThreshold" value="18" min="1" max="255">
+      </label>
+      <label>페이지를 컬러로 볼 색픽셀 비율(%)
+        <input type="number" id="ratioThreshold" value="0.4" step="0.1" min="0.01">
+      </label>
+      <label>렌더링 해상도(scale)
+        <input type="number" id="scaleInput" value="1.2" step="0.1" min="0.5" max="3">
+      </label>
+    </div>
+    <div class="row">
+      <button id="startBtn">분석 시작</button>
+      <button id="exportBtn" class="secondary" disabled>결과 CSV로 내보내기</button>
+    </div>
+    <div id="fileList"></div>
+  </div>
+
+  <div id="results"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const PDF_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+// 일부 환경에서 CORS 정책 때문에 CDN 워커를 직접 new Worker(...)로 생성하지 못해 분석이 영구적으로 멈추는 문제가 있어,
+// 워커 스크립트를 가져와 blob URL로 바꿔서 same-origin 워커처럼 동작하게 만든다.
+const pdfWorkerReady = (async () => {
+  try {
+    const res = await fetch(PDF_WORKER_URL);
+    const code = await res.text();
+    const blobUrl = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+    pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
+  } catch (e) {
+    console.warn('PDF 워커 blob 변환 실패, CDN 직접 참조로 진행:', e);
+  }
+})();
+
+const fileInput = document.getElementById('fileInput');
+const startBtn = document.getElementById('startBtn');
+const exportBtn = document.getElementById('exportBtn');
+const resultsEl = document.getElementById('results');
+const fileListEl = document.getElementById('fileList');
+
+let lastReports = []; // for CSV export
+
+fileInput.addEventListener('change', () => {
+  const files = Array.from(fileInput.files);
+  fileListEl.textContent = files.length
+    ? `선택된 파일 ${files.length}개: ` + files.map(f => f.name).join(', ')
+    : '';
+
+  const hasHwp = files.some(f => /\.(hwp|hwpx)$/i.test(f.name));
+  let banner = document.getElementById('hwpWarnBanner');
+  if (hasHwp) {
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'hwpWarnBanner';
+      banner.className = 'notice';
+      banner.style.borderColor = '#8a3a3a';
+      banner.style.background = '#321515';
+      banner.style.color = '#ffcaca';
+      fileListEl.insertAdjacentElement('afterend', banner);
+    }
+    banner.innerHTML = '⚠ 한글(HWP/HWPX) 파일이 포함되어 있습니다. <b>정확한 페이지별 컬러 판정이 필요하면</b> 한글에서 ' +
+      '<b>[파일 → 다른 이름으로 저장 → PDF]</b>로 저장한 뒤 그 PDF를 다시 올려주세요. 지금 그대로 분석해도 HWPX는 문서 ' +
+      '전체 참고용 결과만, HWP는 분석 자체가 불가합니다.';
+  } else if (banner) {
+    banner.remove();
+  }
+});
+
+function getSettings() {
+  return {
+    sat: Number(document.getElementById('satThreshold').value) || 18,
+    ratio: Number(document.getElementById('ratioThreshold').value) || 0.4,
+    scale: Number(document.getElementById('scaleInput').value) || 1.2,
+  };
+}
+
+function isNeutralColor(r, g, b, satThreshold) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  return (max - min) <= satThreshold;
+}
+
+function analyzeImageData(imageData, satThreshold, ratioThresholdPercent) {
+  const data = imageData.data;
+  let colorPixels = 0;
+  let totalPixels = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3];
+    if (a === 0) continue;
+    totalPixels++;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (!isNeutralColor(r, g, b, satThreshold)) colorPixels++;
+  }
+  const ratio = totalPixels ? (colorPixels / totalPixels * 100) : 0;
+  return { ratio, isColor: ratio > ratioThresholdPercent, colorPixels, totalPixels };
+}
+
+function analyzeImageElementToCanvas(imgEl) {
+  const canvas = document.createElement('canvas');
+  canvas.width = imgEl.naturalWidth || imgEl.width;
+  canvas.height = imgEl.naturalHeight || imgEl.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(imgEl, 0, 0);
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  } catch (e) {
+    return null;
+  }
+  canvas.width = 0; canvas.height = 0;
+  return data;
+}
+
+function loadImageFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { resolve(img); URL.revokeObjectURL(url); };
+    img.onerror = (e) => { reject(e); URL.revokeObjectURL(url); };
+    img.src = url;
+  });
+}
+
+// ---------- PDF 쪽번호(인쇄된 페이지 라벨) 추정 ----------
+// 표지/목차 때문에 PDF 물리적 순서(1,2,3...)와 본문에 찍힌 쪽번호가 어긋나는 경우가 많아,
+// 머리말/꼬리말 영역의 텍스트 레이어에서 쪽번호로 보이는 줄을 찾아 별도로 추정한다. (텍스트가 없는 스캔 이미지는 인식 불가)
+function groupTextLines(items, yTolerance) {
+  const lines = [];
+  for (const item of items) {
+    if (!item.str || !item.str.trim()) continue;
+    const y = item.transform[5];
+    let line = lines.find(l => Math.abs(l.y - y) <= yTolerance);
+    if (!line) { line = { y, items: [] }; lines.push(line); }
+    line.items.push(item);
+  }
+  return lines.map(l => {
+    l.items.sort((a, b) => a.transform[4] - b.transform[4]);
+    l.text = l.items.map(i => i.str).join('').replace(/\s+/g, ' ').trim();
+    l.x = l.items[0].transform[4];
+    return l;
+  });
+}
+
+function parsePageLabel(text) {
+  const s = text.trim();
+  if (!s) return null;
+  let m;
+  if ((m = s.match(/^(\d{1,4})$/))) return m[1];
+  if ((m = s.match(/^[-–—]\s*(\d{1,4})\s*[-–—]$/))) return m[1];
+  if ((m = s.match(/^\(\s*(\d{1,4})\s*\)$/))) return m[1];
+  if ((m = s.match(/^(\d{1,4})\s*[./]\s*\d{1,4}$/))) return m[1]; // "3 / 40" 같은 표기
+  if ((m = s.match(/^(\d{1,4})\s*쪽$/))) return m[1];
+  if ((m = s.match(/^(\d{1,4})\s*페이지$/))) return m[1];
+  if ((m = s.match(/^p\.?\s*(\d{1,4})$/i))) return m[1];
+  if ((m = s.match(/^-?\s*[ivxlcdm]{1,7}\s*-?$/i)) && s.replace(/[-\s]/g, '').length <= 7) {
+    return s.replace(/[-\s]/g, '').toLowerCase();
+  }
+  return null;
+}
+
+async function extractPageLabel(page) {
+  let textContent;
+  try {
+    textContent = await page.getTextContent();
+  } catch (e) {
+    return null;
+  }
+  const view = page.view; // [x0, y0, x1, y1] in PDF user space
+  const pageHeight = view[3] - view[1];
+  const band = pageHeight * 0.12;
+  const bottomThreshold = view[1] + band;
+  const topThreshold = view[3] - band;
+
+  const lines = groupTextLines(textContent.items, 2);
+  const bottomLines = lines.filter(l => l.y <= bottomThreshold);
+  const topLines = lines.filter(l => l.y >= topThreshold);
+
+  const pickFrom = (cands) => {
+    const matches = cands.map(l => ({ l, parsed: parsePageLabel(l.text) })).filter(c => c.parsed);
+    if (!matches.length) return null;
+    // 페이지 중앙에 가까운 후보를 우선 채택 (좌/우측 머리글 날짜·문서번호 오인 방지)
+    const pageCenterX = (view[0] + view[2]) / 2;
+    matches.sort((a, b) => Math.abs(a.l.x - pageCenterX) - Math.abs(b.l.x - pageCenterX));
+    return matches[0].parsed;
+  };
+
+  return pickFrom(bottomLines) || pickFrom(topLines) || null;
+}
+
+// ---------- PDF ----------
+async function analyzePdf(file, settings, onProgress) {
+  await pdfWorkerReady;
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: settings.scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const r = analyzeImageData(imgData, settings.sat, settings.ratio);
+    const label = await extractPageLabel(page);
+    pages.push({ page: p, label, ...r });
+    canvas.width = 0; canvas.height = 0;
+    onProgress && onProgress(p, pdf.numPages);
+  }
+  return { type: 'pdf', pageCount: pdf.numPages, pages };
+}
+
+// ---------- HWPX ----------
+function hexToRgb(hex) {
+  const m = hex.replace('#', '');
+  if (m.length !== 6) return null;
+  return {
+    r: parseInt(m.substring(0, 2), 16),
+    g: parseInt(m.substring(2, 4), 16),
+    b: parseInt(m.substring(4, 6), 16),
+  };
+}
+
+async function analyzeHwpx(file, settings, onProgress) {
+  const zip = await JSZip.loadAsync(file);
+  const allNames = Object.keys(zip.files);
+
+  const sectionNames = allNames
+    .filter(n => /Contents\/section\d+\.xml$/i.test(n))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/section(\d+)\.xml/i)[1], 10);
+      const nb = parseInt(b.match(/section(\d+)\.xml/i)[1], 10);
+      return na - nb;
+    });
+
+  const binDataNames = allNames.filter(n =>
+    /BinData\//i.test(n) && /\.(png|jpe?g|bmp|gif)$/i.test(n)
+  );
+
+  // 1) Embedded images: precise pixel analysis
+  const imageResults = [];
+  for (let i = 0; i < binDataNames.length; i++) {
+    const name = binDataNames[i];
+    try {
+      const blob = await zip.files[name].async('blob');
+      const img = await loadImageFromBlob(blob);
+      const imgData = analyzeImageElementToCanvas(img);
+      if (imgData) {
+        const r = analyzeImageData(imgData, settings.sat, settings.ratio);
+        imageResults.push({ name: name.replace(/^.*BinData\//i, ''), ...r });
+      }
+    } catch (e) {
+      imageResults.push({ name: name.replace(/^.*BinData\//i, ''), error: true });
+    }
+    onProgress && onProgress(i + 1, binDataNames.length);
+  }
+
+  // 2) Text/cell color attributes scanned from raw XML per section (approximate, no exact page mapping)
+  const hexColorRegex = /#([0-9A-Fa-f]{6})\b/g;
+  const sectionColorFindings = []; // {section, colors: [{hex, count}]}
+  for (const secName of sectionNames) {
+    const xmlText = await zip.files[secName].async('text');
+    const counts = {};
+    let m;
+    while ((m = hexColorRegex.exec(xmlText)) !== null) {
+      const hex = '#' + m[1].toUpperCase();
+      if (hex === '#000000' || hex === '#FFFFFF') continue;
+      const rgb = hexToRgb(hex);
+      if (!rgb) continue;
+      if (isNeutralColor(rgb.r, rgb.g, rgb.b, settings.sat)) continue;
+      counts[hex] = (counts[hex] || 0) + 1;
+    }
+    const colors = Object.entries(counts).map(([hex, count]) => ({ hex, count }));
+    if (colors.length) {
+      const secIdx = parseInt(secName.match(/section(\d+)\.xml/i)[1], 10);
+      sectionColorFindings.push({ section: secIdx, colors });
+    }
+  }
+
+  return {
+    type: 'hwpx',
+    sectionCount: sectionNames.length,
+    imageResults,
+    sectionColorFindings,
+  };
+}
+
+// ---------- HWP (binary, unsupported) ----------
+async function analyzeHwpBinary(file) {
+  return { type: 'hwp', unsupported: true, sizeMB: (file.size / (1024 * 1024)).toFixed(2) };
+}
+
+// ---------- Rendering results ----------
+function renderPdfResult(container, file, report) {
+  const colorPages = report.pages.filter(p => p.isColor);
+  const bwPages = report.pages.filter(p => !p.isColor);
+
+  const box = document.createElement('div');
+  box.className = 'file-result';
+  box.innerHTML = `
+    <h3>${escapeHtml(file.name)} <span class="badge pdf">PDF</span></h3>
+    <div class="summary-line">전체 <b>${report.pageCount}</b>쪽 중 컬러 페이지 <b style="color:#ff9b9b">${colorPages.length}</b>쪽,
+      흑백 페이지 <b style="color:#b6f0bf">${bwPages.length}</b>쪽</div>
+    <div class="summary-line"><b>PDF 페이지(순번) 기준</b> 컬러 페이지: ${colorPages.length ? colorPages.map(p => p.page).join(', ') : '(없음)'}</div>
+    <div class="summary-line"><b>쪽번호(인쇄된 번호, 추정) 기준</b> 컬러 페이지: ${
+      (() => {
+        const withLabel = colorPages.filter(p => p.label);
+        const withoutLabel = colorPages.filter(p => !p.label);
+        let s = withLabel.length ? withLabel.map(p => p.label + '쪽').join(', ') : '(없음)';
+        if (withoutLabel.length) s += ` <span style="color:#777">(쪽번호 인식 안 됨: PDF ${withoutLabel.map(p => p.page).join(', ')}p)</span>`;
+        return s;
+      })()
+    }</div>
+    <div class="page-grid"></div>
+  `;
+  const grid = box.querySelector('.page-grid');
+  report.pages.forEach(p => {
+    const chip = document.createElement('div');
+    chip.className = 'page-chip ' + (p.isColor ? 'color' : 'bw');
+    chip.title = `색 픽셀 비율: ${p.ratio.toFixed(2)}%`;
+    chip.innerHTML = `${p.page}<div style="font-size:10px;opacity:0.65;margin-top:1px">${p.label ? p.label + '쪽' : '-'}</div>`;
+    grid.appendChild(chip);
+  });
+  container.appendChild(box);
+}
+
+function renderHwpxResult(container, file, report) {
+  const colorImages = report.imageResults.filter(i => i.isColor);
+  const box = document.createElement('div');
+  box.className = 'file-result';
+  box.innerHTML = `
+    <h3>${escapeHtml(file.name)} <span class="badge hwpx">HWPX</span></h3>
+    <div class="summary-line">섹션 ${report.sectionCount}개, 포함 이미지 ${report.imageResults.length}개 중 컬러 이미지 <b style="color:#ff9b9b">${colorImages.length}</b>개</div>
+    <table>
+      <thead><tr><th>이미지 파일</th><th>판정</th><th>색 픽셀 비율</th></tr></thead>
+      <tbody>
+        ${report.imageResults.map(i => `
+          <tr>
+            <td>${escapeHtml(i.name)}</td>
+            <td style="color:${i.error ? '#999' : (i.isColor ? '#ff9b9b' : '#b6f0bf')}">${i.error ? '분석 실패' : (i.isColor ? '컬러' : '흑백')}</td>
+            <td>${i.error ? '-' : i.ratio.toFixed(2) + '%'}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    <details>
+      <summary>본문 텍스트/표 색상 흔적 (참고용 — 정확한 페이지 매칭 불가)</summary>
+      ${report.sectionColorFindings.length === 0
+        ? '<div class="summary-line">발견된 색상 속성 없음</div>'
+        : report.sectionColorFindings.map(s => `
+            <div class="summary-line"><b>섹션 ${s.section}</b>: ${s.colors.map(c =>
+              `<span class="swatch" style="background:${c.hex}"></span>${c.hex} (${c.count}회)`).join(', ')}
+            </div>`).join('')}
+    </details>
+  `;
+  container.appendChild(box);
+}
+
+function renderHwpResult(container, file, report) {
+  const box = document.createElement('div');
+  box.className = 'file-result';
+  box.innerHTML = `
+    <h3>${escapeHtml(file.name)} <span class="badge unsupported">HWP 미지원</span></h3>
+    <div class="summary-line">구버전 한글 바이너리(.hwp) 형식은 브라우저에서 시각적으로 안전하게 렌더링할 방법이 없어 컬러 페이지 분석을 지원하지 않습니다.</div>
+    <div class="summary-line">파일 크기: ${report.sizeMB} MB</div>
+    <div class="summary-line">👉 한글 프로그램에서 <b>다른 이름으로 저장 → PDF</b>로 변환한 뒤 이 도구에 다시 업로드해 주세요.</div>
+  `;
+  container.appendChild(box);
+}
+
+function renderErrorResult(container, file, err) {
+  const box = document.createElement('div');
+  box.className = 'file-result';
+  box.innerHTML = `
+    <h3>${escapeHtml(file.name)} <span class="badge unsupported">오류</span></h3>
+    <div class="summary-line" style="color:#ff9b9b">분석 중 오류가 발생했습니다: ${escapeHtml(String(err && err.message || err))}</div>
+  `;
+  container.appendChild(box);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------- Main flow ----------
+startBtn.addEventListener('click', async () => {
+  const files = Array.from(fileInput.files);
+  if (!files.length) { alert('파일을 먼저 선택해 주세요.'); return; }
+
+  const settings = getSettings();
+  startBtn.disabled = true;
+  exportBtn.disabled = true;
+  resultsEl.innerHTML = '';
+  lastReports = [];
+
+  for (const file of files) {
+    const progressBox = document.createElement('div');
+    progressBox.className = 'file-result';
+    progressBox.innerHTML = `<h3>${escapeHtml(file.name)}</h3><div class="summary-line">분석 중...</div>
+      <div class="progress-bar"><div class="progress-fill"></div></div>`;
+    resultsEl.appendChild(progressBox);
+    const fill = progressBox.querySelector('.progress-fill');
+    const onProgress = (cur, total) => { fill.style.width = (total ? (cur / total * 100) : 0) + '%'; };
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    try {
+      let report;
+      if (ext === 'pdf') {
+        report = await analyzePdf(file, settings, onProgress);
+      } else if (ext === 'hwpx') {
+        report = await analyzeHwpx(file, settings, onProgress);
+      } else if (ext === 'hwp') {
+        report = await analyzeHwpBinary(file);
+      } else {
+        throw new Error('지원하지 않는 파일 형식입니다: .' + ext);
+      }
+      progressBox.remove();
+      lastReports.push({ file, report });
+      if (report.type === 'pdf') renderPdfResult(resultsEl, file, report);
+      else if (report.type === 'hwpx') renderHwpxResult(resultsEl, file, report);
+      else if (report.type === 'hwp') renderHwpResult(resultsEl, file, report);
+    } catch (err) {
+      progressBox.remove();
+      renderErrorResult(resultsEl, file, err);
+      console.error(err);
+    }
+  }
+
+  startBtn.disabled = false;
+  exportBtn.disabled = lastReports.length === 0;
+});
+
+exportBtn.addEventListener('click', () => {
+  const rows = [['파일명', '형식', 'PDF 페이지(순번)', '쪽번호(인쇄, 추정)', '판정', '색픽셀비율(%)']];
+  for (const { file, report } of lastReports) {
+    if (report.type === 'pdf') {
+      for (const p of report.pages) {
+        rows.push([file.name, 'PDF', p.page, p.label ? p.label + '쪽' : '(인식 안 됨)', p.isColor ? '컬러' : '흑백', p.ratio.toFixed(2)]);
+      }
+    } else if (report.type === 'hwpx') {
+      for (const i of report.imageResults) {
+        rows.push([file.name, 'HWPX-이미지', i.name, '-', i.error ? '분석실패' : (i.isColor ? '컬러' : '흑백'), i.error ? '' : i.ratio.toFixed(2)]);
+      }
+      for (const s of report.sectionColorFindings) {
+        rows.push([file.name, 'HWPX-텍스트색상(참고)', `섹션 ${s.section}`, '-', s.colors.map(c => c.hex).join('/'), '']);
+      }
+    } else if (report.type === 'hwp') {
+      rows.push([file.name, 'HWP', '-', '-', '미지원', '']);
+    }
+  }
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '컬러페이지_분석결과.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
