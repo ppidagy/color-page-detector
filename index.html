@@ -654,6 +654,23 @@ function woRect(x0, y0, x1, y1) {
   return { x: x0, y: WO_PAGE_H - y1, width: x1 - x0, height: y1 - y0 };
 }
 
+function getChapterLabel(fileName) {
+  const m = fileName.match(/^(\d{3,4})/);
+  return m ? m[1] : null;
+}
+
+function formatFileColorPages(report) {
+  const colorPages = report.pages.filter(p => p.isColor);
+  if (!colorPages.length) return null;
+  const withLabel = colorPages.filter(p => p.label).map(p => Number(p.label)).filter(Number.isFinite);
+  const withoutLabel = colorPages.filter(p => !p.label).map(p => p.page);
+  let text = compressRanges(withLabel);
+  if (withoutLabel.length) {
+    text += (text ? ', ' : '') + `(쪽번호 미인식 PDF p.${compressRanges(withoutLabel)})`;
+  }
+  return text || null;
+}
+
 async function buildWorkOrderPdf(pdfReports) {
   const { PDFDocument, rgb, StandardFonts } = PDFLib;
   const pdfDoc = await PDFDocument.create();
@@ -664,68 +681,66 @@ async function buildWorkOrderPdf(pdfReports) {
   const today = new Date();
   const dateStr = `${today.getFullYear()}년  ${today.getMonth() + 1}월  ${today.getDate()}일`;
 
+  // 여러 파일을 분석했어도 인쇄요청서는 1장으로 통합하고, 장 구분(0100/0200...)이 있으면 그대로 줄로 나눠 적는다.
+  const chapterLines = [];
   for (const { file, report } of pdfReports) {
-    const page = pdfDoc.addPage([WO_PAGE_W, WO_PAGE_H]);
-    const form = pdfDoc.getForm();
+    const text = formatFileColorPages(report);
+    if (!text) continue;
+    const chapter = getChapterLabel(file.name);
+    chapterLines.push(chapter ? `${chapter}  :  ${text}` : text);
+  }
+  const colorPagesText = chapterLines.length ? chapterLines.join('\n') : '(컬러 페이지 없음)';
+  const ctx = { dateStr, projectName: '', colorPagesText };
 
-    // 외곽선 + 제목
-    page.drawRectangle({ ...woRect(WO_TABLE.x0, WO_TABLE.y0, WO_TABLE.x1, WO_TABLE.y1), borderColor: rgb(0, 0, 0), borderWidth: 1 });
-    page.drawRectangle({ ...woRect(WO_TABLE.x0, WO_TITLE_Y[0], WO_TABLE.x1, WO_TITLE_Y[1]), borderColor: rgb(0, 0, 0), borderWidth: 1 });
-    const titleText = '작 업 내 용';
-    const titleWidth = font.widthOfTextAtSize(titleText, 20);
-    page.drawText(titleText, {
-      x: (WO_PAGE_W - titleWidth) / 2, y: WO_PAGE_H - (WO_TITLE_Y[0] + WO_TITLE_Y[1]) / 2 - 7,
-      size: 20, font, color: rgb(0, 0, 0),
+  const page = pdfDoc.addPage([WO_PAGE_W, WO_PAGE_H]);
+  const form = pdfDoc.getForm();
+
+  // 외곽선 + 제목
+  page.drawRectangle({ ...woRect(WO_TABLE.x0, WO_TABLE.y0, WO_TABLE.x1, WO_TABLE.y1), borderColor: rgb(0, 0, 0), borderWidth: 1 });
+  page.drawRectangle({ ...woRect(WO_TABLE.x0, WO_TITLE_Y[0], WO_TABLE.x1, WO_TITLE_Y[1]), borderColor: rgb(0, 0, 0), borderWidth: 1 });
+  const titleText = '작 업 내 용';
+  const titleWidth = font.widthOfTextAtSize(titleText, 20);
+  page.drawText(titleText, {
+    x: (WO_PAGE_W - titleWidth) / 2, y: WO_PAGE_H - (WO_TITLE_Y[0] + WO_TITLE_Y[1]) / 2 - 7,
+    size: 20, font, color: rgb(0, 0, 0),
+  });
+
+  // 라벨 셀 (회색 배경)
+  for (const [label, x0, y0, x1, y1] of WO_LABEL_CELLS) {
+    const r = woRect(x0, y0, x1, y1);
+    page.drawRectangle({ ...r, color: rgb(0.88, 0.88, 0.88), borderColor: rgb(0, 0, 0), borderWidth: 0.75 });
+    const lines = label.split('/');
+    const lineHeight = 11;
+    const startY = r.y + r.height / 2 + (lines.length - 1) * lineHeight / 2;
+    lines.forEach((line, i) => {
+      const w = font.widthOfTextAtSize(line, 9.5);
+      page.drawText(line, { x: r.x + (r.width - w) / 2, y: startY - i * lineHeight - 3, size: 9.5, font, color: rgb(0, 0, 0) });
     });
+  }
+  for (const [label, x0, y0, x1, y1] of WO_PLAIN_LABELS) {
+    const r = woRect(x0, y0, x1, y1);
+    page.drawRectangle({ ...r, borderColor: rgb(0, 0, 0), borderWidth: 0.75 });
+    const w = font.widthOfTextAtSize(label, 9.5);
+    page.drawText(label, { x: r.x + (r.width - w) / 2, y: r.y + r.height / 2 - 3, size: 9.5, font, color: rgb(0, 0, 0) });
+  }
 
-    // 라벨 셀 (회색 배경)
-    for (const [label, x0, y0, x1, y1] of WO_LABEL_CELLS) {
-      const r = woRect(x0, y0, x1, y1);
-      page.drawRectangle({ ...r, color: rgb(0.88, 0.88, 0.88), borderColor: rgb(0, 0, 0), borderWidth: 0.75 });
-      const lines = label.split('/');
-      const lineHeight = 11;
-      const startY = r.y + r.height / 2 + (lines.length - 1) * lineHeight / 2;
-      lines.forEach((line, i) => {
-        const w = font.widthOfTextAtSize(line, 9.5);
-        page.drawText(line, { x: r.x + (r.width - w) / 2, y: startY - i * lineHeight - 3, size: 9.5, font, color: rgb(0, 0, 0) });
-      });
-    }
-    for (const [label, x0, y0, x1, y1] of WO_PLAIN_LABELS) {
-      const r = woRect(x0, y0, x1, y1);
-      page.drawRectangle({ ...r, borderColor: rgb(0, 0, 0), borderWidth: 0.75 });
-      const w = font.widthOfTextAtSize(label, 9.5);
-      page.drawText(label, { x: r.x + (r.width - w) / 2, y: r.y + r.height / 2 - 3, size: 9.5, font, color: rgb(0, 0, 0) });
-    }
-
-    // 분석 컨텍스트 값 계산
-    const colorPages = report.pages.filter(p => p.isColor);
-    const withLabel = colorPages.filter(p => p.label).map(p => Number(p.label)).filter(Number.isFinite);
-    const withoutLabel = colorPages.filter(p => !p.label).map(p => p.page);
-    let colorPagesText = compressRanges(withLabel);
-    if (withoutLabel.length) {
-      colorPagesText += (colorPagesText ? '\n' : '') + `(쪽번호 인식 안 됨, PDF 페이지 기준: ${compressRanges(withoutLabel)})`;
-    }
-    if (!colorPagesText) colorPagesText = '(컬러 페이지 없음)';
-    const ctx = { dateStr, projectName: file.name.replace(/\.pdf$/i, ''), colorPagesText };
-
-    // 입력 가능 필드 (분석값은 기본값으로 채워두되 자유롭게 수정 가능)
-    for (const [name, x0, y0, x1, y1, multiline, defaultFn] of WO_FIELDS) {
-      const r = woRect(x0 + 2, y0 + 2, x1 - 2, y1 - 2);
-      const field = form.createTextField(`${name}_${pdfDoc.getPageCount()}`);
-      field.enableMultiline(); // 단일행 모드에서 첫 글자가 잘리는 pdf-lib 버그 회피 (모든 칸에 동일 적용)
-      field.addToPage(page, {
-        ...r,
-        font,
-        textColor: rgb(0, 0, 0),
-        backgroundColor: rgb(1, 1, 0.85),
-        borderColor: rgb(0.6, 0.6, 0.2),
-        borderWidth: 0.5,
-      });
-      field.setFontSize(9.5); // 자동 크기 조절 시 첫 글자가 잘리는 pdf-lib 렌더링 버그를 피하기 위해 고정 크기 사용
-      const val = defaultFn(ctx) || '';
-      field.setText(String(val));
-      field.updateAppearances(font);
-    }
+  // 입력 가능 필드 (분석값은 기본값으로 채워두되 자유롭게 수정 가능, 용역명은 공란으로 직접 입력)
+  for (const [name, x0, y0, x1, y1, multiline, defaultFn] of WO_FIELDS) {
+    const r = woRect(x0 + 2, y0 + 2, x1 - 2, y1 - 2);
+    const field = form.createTextField(name);
+    field.enableMultiline(); // 단일행 모드에서 첫 글자가 잘리는 pdf-lib 버그 회피 (모든 칸에 동일 적용)
+    field.addToPage(page, {
+      ...r,
+      font,
+      textColor: rgb(0, 0, 0),
+      backgroundColor: rgb(1, 1, 0.85),
+      borderColor: rgb(0.6, 0.6, 0.2),
+      borderWidth: 0.5,
+    });
+    field.setFontSize(9.5); // 자동 크기 조절 시 첫 글자가 잘리는 pdf-lib 렌더링 버그를 피하기 위해 고정 크기 사용
+    const val = defaultFn(ctx) || '';
+    field.setText(String(val));
+    field.updateAppearances(font);
   }
 
   return pdfDoc.save();
