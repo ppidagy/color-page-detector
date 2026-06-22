@@ -126,7 +126,7 @@
     <div class="row">
       <button id="startBtn">분석 시작</button>
       <button id="exportBtn" class="secondary" disabled>결과 CSV로 내보내기</button>
-      <button id="exportPdfBtn" class="secondary" disabled>작업지시서 PDF로 내보내기</button>
+      <button id="exportPdfBtn" class="secondary" disabled>인쇄요청서(지비 양식) 내보내기</button>
     </div>
     <div id="fileList"></div>
   </div>
@@ -742,7 +742,7 @@ exportPdfBtn.addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = '작업지시서.pdf';
+    a.download = '인쇄요청서.pdf';
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
