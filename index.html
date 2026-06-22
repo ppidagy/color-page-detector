@@ -126,6 +126,7 @@
     <div class="row">
       <button id="startBtn">분석 시작</button>
       <button id="exportBtn" class="secondary" disabled>결과 CSV로 내보내기</button>
+      <button id="exportPdfBtn" class="secondary" disabled>작업지시서 PDF로 내보내기</button>
     </div>
     <div id="fileList"></div>
   </div>
@@ -134,6 +135,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit/dist/fontkit.umd.min.js"></script>
 <script>
 const PDF_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
@@ -153,6 +156,7 @@ const pdfWorkerReady = (async () => {
 const fileInput = document.getElementById('fileInput');
 const startBtn = document.getElementById('startBtn');
 const exportBtn = document.getElementById('exportBtn');
+const exportPdfBtn = document.getElementById('exportPdfBtn');
 const resultsEl = document.getElementById('results');
 const fileListEl = document.getElementById('fileList');
 
@@ -507,6 +511,7 @@ startBtn.addEventListener('click', async () => {
   const settings = getSettings();
   startBtn.disabled = true;
   exportBtn.disabled = true;
+  exportPdfBtn.disabled = true;
   resultsEl.innerHTML = '';
   lastReports = [];
 
@@ -545,6 +550,7 @@ startBtn.addEventListener('click', async () => {
 
   startBtn.disabled = false;
   exportBtn.disabled = lastReports.length === 0;
+  exportPdfBtn.disabled = lastReports.length === 0 || !lastReports.some(r => r.report.type === 'pdf');
 });
 
 exportBtn.addEventListener('click', () => {
@@ -573,6 +579,179 @@ exportBtn.addEventListener('click', () => {
   a.download = '컬러페이지_분석결과.csv';
   a.click();
   URL.revokeObjectURL(url);
+});
+
+// ---------- 작업지시서 PDF 내보내기 (수정 가능한 양식) ----------
+const KOREAN_FONT_URL = 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff2';
+let koreanFontBytesPromise = null;
+function getKoreanFontBytes() {
+  if (!koreanFontBytesPromise) {
+    koreanFontBytesPromise = fetch(KOREAN_FONT_URL).then(r => r.arrayBuffer());
+  }
+  return koreanFontBytesPromise;
+}
+
+function compressRanges(nums) {
+  const sorted = [...new Set(nums)].filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!sorted.length) return '';
+  const parts = [];
+  let start = sorted[0], prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) { prev = n; continue; }
+    parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+    start = n; prev = n;
+  }
+  parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+  return parts.join(', ');
+}
+
+// 작업내용 양식 좌표 (A4, pt, 좌상단 기준 [x0,y0,x1,y1] → pdf-lib 좌하단 변환은 헬퍼에서 처리)
+const WO_PAGE_W = 595, WO_PAGE_H = 841;
+const WO_TABLE = { x0: 87.9, x1: 510.7, y0: 62, y1: 729.8 };
+const WO_TITLE_Y = [62, 99.6];
+const WO_DATE_Y = [99.6, 128.9];
+const WO_LABEL_CELLS = [
+  ['환경부', 87.9, 128.9, 154.7, 167.7],
+  ['내선번호', 302.7, 128.9, 379.0, 148.3],
+  ['휴 대 폰', 302.7, 148.3, 379.0, 167.7],
+  ['용역명', 87.9, 167.7, 154.7, 196.9],
+  ['부  수', 87.9, 196.9, 154.7, 229.1],
+  ['표지번호', 255.6, 196.9, 325.3, 229.1],
+  ['칼라/흑백', 379.0, 196.9, 455.0, 229.1],
+  ['양면/단면', 87.9, 229.1, 154.7, 263.6],
+  ['제본방향', 255.6, 229.1, 325.3, 263.6],
+  ['간  지', 87.9, 263.6, 154.7, 292.8],
+  ['납품시간', 255.6, 263.6, 325.3, 292.8],
+  ['A3', 87.9, 292.8, 154.7, 325.0],
+  ['칼라 page', 87.9, 325.0, 154.7, 641.1],
+  ['기타 전달사항', 87.9, 641.1, 154.7, 729.8],
+];
+const WO_PLAIN_LABELS = [
+  ['시까지', 453.8, 263.6, 510.7, 292.8],
+];
+const WO_FIELDS = [
+  // name, x0,y0,x1,y1, multiline, defaultValueFn(ctx)
+  ['date_value', 87.9, 99.6, 510.7, 128.9, false, ctx => ctx.dateStr],
+  ['env_value', 154.7, 128.9, 255.6, 167.7, false, () => ''],
+  ['ext_no_value', 384.6, 128.9, 510.7, 148.3, false, () => ''],
+  ['mobile_value', 384.6, 148.3, 510.7, 167.7, false, () => ''],
+  ['project_value', 154.7, 167.7, 510.7, 196.9, false, ctx => ctx.projectName],
+  ['copies_value', 154.7, 196.9, 255.6, 229.1, false, () => ''],
+  ['cover_value', 325.3, 196.9, 379.0, 229.1, false, () => ''],
+  ['colorbw_value', 455.0, 196.9, 510.7, 229.1, false, () => ''],
+  ['duplex_value', 154.7, 229.1, 255.6, 263.6, false, () => ''],
+  ['binding_value', 325.3, 229.1, 510.7, 263.6, false, () => ''],
+  ['divider_value', 154.7, 263.6, 255.6, 292.8, false, () => ''],
+  ['deliverytime_value', 325.3, 263.6, 453.8, 292.8, false, () => ''],
+  ['a3_value', 154.7, 292.8, 510.7, 325.0, false, () => ''],
+  ['colorpages_value', 154.7, 325.0, 510.7, 641.1, true, ctx => ctx.colorPagesText],
+  ['notes_value', 154.7, 641.1, 510.7, 729.8, false, () => ''],
+];
+
+function woRect(x0, y0, x1, y1) {
+  // 좌상단(top-left) 좌표를 pdf-lib의 좌하단(bottom-left) 좌표로 변환
+  return { x: x0, y: WO_PAGE_H - y1, width: x1 - x0, height: y1 - y0 };
+}
+
+async function buildWorkOrderPdf(pdfReports) {
+  const { PDFDocument, rgb, StandardFonts } = PDFLib;
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+  const fontBytes = await getKoreanFontBytes();
+  const font = await pdfDoc.embedFont(fontBytes, { subset: true });
+
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}년  ${today.getMonth() + 1}월  ${today.getDate()}일`;
+
+  for (const { file, report } of pdfReports) {
+    const page = pdfDoc.addPage([WO_PAGE_W, WO_PAGE_H]);
+    const form = pdfDoc.getForm();
+
+    // 외곽선 + 제목
+    page.drawRectangle({ ...woRect(WO_TABLE.x0, WO_TABLE.y0, WO_TABLE.x1, WO_TABLE.y1), borderColor: rgb(0, 0, 0), borderWidth: 1 });
+    page.drawRectangle({ ...woRect(WO_TABLE.x0, WO_TITLE_Y[0], WO_TABLE.x1, WO_TITLE_Y[1]), borderColor: rgb(0, 0, 0), borderWidth: 1 });
+    const titleText = '작 업 내 용';
+    const titleWidth = font.widthOfTextAtSize(titleText, 20);
+    page.drawText(titleText, {
+      x: (WO_PAGE_W - titleWidth) / 2, y: WO_PAGE_H - (WO_TITLE_Y[0] + WO_TITLE_Y[1]) / 2 - 7,
+      size: 20, font, color: rgb(0, 0, 0),
+    });
+
+    // 라벨 셀 (회색 배경)
+    for (const [label, x0, y0, x1, y1] of WO_LABEL_CELLS) {
+      const r = woRect(x0, y0, x1, y1);
+      page.drawRectangle({ ...r, color: rgb(0.88, 0.88, 0.88), borderColor: rgb(0, 0, 0), borderWidth: 0.75 });
+      const lines = label.split('/');
+      const lineHeight = 11;
+      const startY = r.y + r.height / 2 + (lines.length - 1) * lineHeight / 2;
+      lines.forEach((line, i) => {
+        const w = font.widthOfTextAtSize(line, 9.5);
+        page.drawText(line, { x: r.x + (r.width - w) / 2, y: startY - i * lineHeight - 3, size: 9.5, font, color: rgb(0, 0, 0) });
+      });
+    }
+    for (const [label, x0, y0, x1, y1] of WO_PLAIN_LABELS) {
+      const r = woRect(x0, y0, x1, y1);
+      page.drawRectangle({ ...r, borderColor: rgb(0, 0, 0), borderWidth: 0.75 });
+      const w = font.widthOfTextAtSize(label, 9.5);
+      page.drawText(label, { x: r.x + (r.width - w) / 2, y: r.y + r.height / 2 - 3, size: 9.5, font, color: rgb(0, 0, 0) });
+    }
+
+    // 분석 컨텍스트 값 계산
+    const colorPages = report.pages.filter(p => p.isColor);
+    const withLabel = colorPages.filter(p => p.label).map(p => Number(p.label)).filter(Number.isFinite);
+    const withoutLabel = colorPages.filter(p => !p.label).map(p => p.page);
+    let colorPagesText = compressRanges(withLabel);
+    if (withoutLabel.length) {
+      colorPagesText += (colorPagesText ? '\n' : '') + `(쪽번호 인식 안 됨, PDF 페이지 기준: ${compressRanges(withoutLabel)})`;
+    }
+    if (!colorPagesText) colorPagesText = '(컬러 페이지 없음)';
+    const ctx = { dateStr, projectName: file.name.replace(/\.pdf$/i, ''), colorPagesText };
+
+    // 입력 가능 필드 (분석값은 기본값으로 채워두되 자유롭게 수정 가능)
+    for (const [name, x0, y0, x1, y1, multiline, defaultFn] of WO_FIELDS) {
+      const r = woRect(x0 + 2, y0 + 2, x1 - 2, y1 - 2);
+      const field = form.createTextField(`${name}_${pdfDoc.getPageCount()}`);
+      if (multiline) field.enableMultiline();
+      const val = defaultFn(ctx) || '';
+      field.setText(String(val));
+      field.addToPage(page, {
+        ...r,
+        font,
+        textColor: rgb(0, 0, 0),
+        backgroundColor: rgb(1, 1, 0.85),
+        borderColor: rgb(0.6, 0.6, 0.2),
+        borderWidth: 0.5,
+      });
+      field.updateAppearances(font);
+    }
+  }
+
+  return pdfDoc.save();
+}
+
+exportPdfBtn.addEventListener('click', async () => {
+  const pdfReports = lastReports.filter(r => r.report.type === 'pdf');
+  if (!pdfReports.length) { alert('PDF로 분석된 결과가 없습니다. (HWPX/HWP는 페이지 단위 결과가 없어 작업지시서를 만들 수 없습니다)'); return; }
+  exportPdfBtn.disabled = true;
+  const prevLabel = exportPdfBtn.textContent;
+  exportPdfBtn.textContent = '생성 중... (글꼴 불러오는 중)';
+  try {
+    const bytes = await buildWorkOrderPdf(pdfReports);
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '작업지시서.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error(e);
+    alert('PDF 생성 중 오류가 발생했습니다: ' + e.message);
+  } finally {
+    exportPdfBtn.disabled = false;
+    exportPdfBtn.textContent = prevLabel;
+  }
 });
 </script>
 </body>
